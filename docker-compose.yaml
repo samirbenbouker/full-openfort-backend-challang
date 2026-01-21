@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  blocks:
+    build:
+      context: .
+      dockerfile: Dockerfile.blocks
+    ports:
+      - "8081:8081"
+
+  mempool:
+    build:
+      context: ./mempool
+      dockerfile: Dockerfile.mempool
+    depends_on:
+      - blocks
+    environment:
+      - BLOCKS_BASE_URL=http://blocks:8080
+      - BATCH_TICK_MS=250
+    ports:
+      - "9090:9090"
