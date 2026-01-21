@@ -56,51 +56,14 @@ HTTP client responsible for:
 3. The transaction is added to the mempool
 4. A scheduled task periodically:
 
-    * Selects the best batch of transactions
-    * Submits the batch to the Blocks service
-    * Retries on failure with exponential backoff
+   * Selects the best batch of transactions
+   * Submits the batch to the Blocks service
+   * Retries on failure with exponential backoff
 5. Statistics are updated and exposed via `GET /stats`
 
 ---
 
-## Batch Selection Strategy
-
-Transactions are:
-
-1. Sorted by **highest fee first**
-2. Tie-broken by **lowest gas price**
-3. Added greedily until the batch reaches the gas limit
-
-Transactions that do not fit remain in the mempool for future batches.
-
----
-
-## Concurrency Model
-
-* **Reentrant locks** are used to ensure thread safety
-* Separate locks are used for:
-
-    * Mempool access
-    * Batch submission
-* This prevents:
-
-    * Concurrent modifications of the mempool
-    * Multiple batch submissions at the same time
-
----
-
-## Retry & Backoff Policy
-
-* Up to **8 submission attempts**
-* Initial backoff: **200 ms**
-* Exponential backoff capped at **1500 ms**
-* Failed batches are reinserted into the mempool
-
----
-
 ## Configuration
-
-### Application Properties
 
 ```properties
 # Interval between batch attempts (milliseconds)
@@ -120,47 +83,72 @@ blocks.base-url=http://blocks:8080
 POST /transactions
 ```
 
-**Request body**
-
-```json
-{
-  "id": "tx-123"
-}
-```
-
-**Response**
-
-```json
-{
-  "accepted": true,
-  "tx": {
-    "id": "tx-123",
-    "gasPrice": 123,
-    "fee": 45
-  }
-}
-```
-
----
-
 ### Get Stats
 
 ```
 GET /stats
 ```
 
-**Response**
+---
 
-```json
-{
-  "mempoolSize": 5,
-  "accepted": 20,
-  "submittedBatches": 3,
-  "submittedTxs": 12,
-  "failedSubmits": 1,
-  "totalFees": 450,
-  "totalGas": 9800
-}
+## Example Usage (bash)
+
+> These examples assume the service is running locally on **port 9090**
+> and that `jq` is installed for JSON formatting.
+
+### Check service statistics
+
+```bash
+curl -s localhost:9090/stats | jq
+```
+
+---
+
+### Submit a single transaction
+
+```bash
+curl -s -X POST localhost:9090/transactions \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"tx-price-1"}' | jq
+
+curl -s -X POST localhost:9090/transactions \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"tx-price-2"}' | jq
+```
+
+---
+
+### Stress test: submit many transactions quickly
+
+```bash
+for i in {1..50}; do
+  curl -s -X POST localhost:9090/transactions \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"tx-load-$i\"}" > /dev/null
+done
+
+curl -s localhost:9090/stats | jq
+```
+
+---
+
+### Observe batching behavior
+
+Run this in one terminal:
+
+```bash
+watch -n 1 'curl -s localhost:9090/stats | jq'
+```
+
+And in another terminal submit transactions:
+
+```bash
+for i in {1..20}; do
+  curl -s -X POST localhost:9090/transactions \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"tx-live-$i\"}" | jq
+  sleep 0.1
+done
 ```
 
 ---
@@ -171,57 +159,22 @@ GET /stats
   Simple and fast, suitable for a single-instance service.
 
 * **Blocking WebClient calls**
-  Acceptable here because batch submission is already off the request path
-  and controlled by a scheduler.
+  Acceptable here because batch submission is already off the request path.
 
 * **No persistence**
-  State is ephemeral by design; restarting the service clears the mempool.
+  State is ephemeral by design.
 
 * **Explicit locking**
-  Chosen over synchronized collections to clearly separate critical sections.
+  Chosen to clearly separate critical sections.
 
 ---
 
 ## Limitations
 
 * No persistence or crash recovery
-* Single-node only (no distributed coordination)
+* Single-node only
 * No authentication or rate limiting
 * Blocking calls inside scheduler
-
-These trade-offs are intentional to keep the implementation focused and easy to reason about.
-
----
-
-## Running the Project
-
-### Requirements
-
-* Java 17+
-* Maven or Gradle
-* A running Blocks service
-
-### Run locally
-
-```bash
-./mvnw spring-boot:run
-```
-
-or
-
-```bash
-./gradlew bootRun
-```
-
----
-
-## Future Improvements
-
-* Persist mempool and stats
-* Replace blocking calls with non-blocking pipelines
-* Distributed batching and leader election
-* Metrics export (Prometheus)
-* Dead-letter queue for permanently failing batches
 
 ---
 
